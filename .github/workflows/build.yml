@@ -17,6 +17,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Checkout Preloader Android
+        uses: actions/checkout@v4
+        with:
+          repository: LeviLamina/preloader-android
+          path: preloader-android
+          submodules: recursive
+
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
         with:
