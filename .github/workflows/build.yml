@@ -43,5 +43,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: InGameKeyboard-levipack
-          path: "*.levipack"
+          path: "dist/*.levipack"
           
