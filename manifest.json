@@ -1,0 +1,8 @@
+{
+  "type": "preload-native",
+  "name": "In-Game Keyboard",
+  "author": "Chriel",
+  "description": "Lightweight on-screen keyboard for chat, commands, signs and search bars.",
+  "version": "1.0.0",
+  "entry": "libingame_keyboard.so"
+}
