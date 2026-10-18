@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Usage: ANDROID_NDK_HOME=/path/to/ndk ./build.sh /path/to/preloader-android
 set -euo pipefail
-PRELOADER="${1:?path to preloader-android checkout}"
-NDK="${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}"
+
+PRELOADER="${1:-preloader-android}"
+NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK:-/usr/local/lib/android/sdk/ndk-bundle}}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$HERE/build/android-arm64-v8a"
 
@@ -16,3 +16,4 @@ cmake --build "$BUILD" --target ingame_keyboard
 python3 "$HERE/scripts/package_levipack.py" \
   --library "$BUILD/out/arm64-v8a/libingame_keyboard.so" \
   --output "$HERE/dist/InGameKeyboard.levipack"
+  
