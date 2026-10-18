@@ -20,7 +20,7 @@ jobs:
       - name: Checkout Preloader Android
         uses: actions/checkout@v4
         with:
-          repository: LeviLamina/preloader-android
+          repository: LiteLDev/preloader-android
           path: preloader-android
           submodules: recursive
 
