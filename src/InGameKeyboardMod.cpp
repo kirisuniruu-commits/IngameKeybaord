@@ -1,4 +1,11 @@
+/**
+ * @file InGameKeyboardMod.cpp
+ * @brief Full-featured In-Game Virtual Keyboard Mod for Minecraft Bedrock (Android)
+ * @author Kirisuniruu
+ */
+
 #include <pl/Mod.hpp>
+#include <imgui.h>
 
 // ==========================================
 // Mod State & Configuration Variables
@@ -114,7 +121,7 @@ static void RenderInGameKeyboardUI() {
 // ==========================================
 MOD_AUTHOR("Kirisuniruu");
 MOD_NAME("InGameKeyboard");
-MOD_VERSION("2.5.0");
+MOD_VERSION("2.6.0");
 
 void PreloaderModInit() {
     Mod::registerImGuiRender([]() {
