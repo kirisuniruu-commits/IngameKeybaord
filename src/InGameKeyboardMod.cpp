@@ -119,12 +119,10 @@ static void RenderInGameKeyboardUI() {
 // ==========================================
 // Mod Initialization Hook
 // ==========================================
-MOD_AUTHOR("Kirisuniruu");
-MOD_NAME("InGameKeyboard");
-MOD_VERSION("2.8.0");
-
-void PreloaderModInit() {
-    Mod::registerImGuiRender([]() {
-        RenderInGameKeyboardUI();
-    });
+extern "C" {
+    void PreloaderModInit() {
+        pl::Mod::registerImGuiRender([]() {
+            RenderInGameKeyboardUI();
+        });
+    }
 }
