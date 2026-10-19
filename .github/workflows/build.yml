@@ -14,34 +14,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Checkout Preloader Android
         uses: actions/checkout@v4
         with:
           repository: LiteLDev/preloader-android
           path: preloader-android
-          submodules: recursive
 
-      - name: Set up Android NDK
+      - name: Set up Android NDK r28c
+        id: ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r25c
+          ndk-version: r28c
 
-      - name: Set up CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.22.1'
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Run build script
+      - name: Build and package
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
           chmod +x ./build.sh
-          ./build.sh
+          ./build.sh "$GITHUB_WORKSPACE/preloader-android"
 
       - name: Upload LeviPack Artifact
         uses: actions/upload-artifact@v4
         with:
           name: InGameKeyboard-levipack
-          path: "dist/*.levipack"
-          
+          path: dist/InGameKeyboard.levipack
+          if-no-files-found: error
