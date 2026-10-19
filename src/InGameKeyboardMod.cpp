@@ -121,7 +121,7 @@ static void RenderInGameKeyboardUI() {
 // ==========================================
 MOD_AUTHOR("Kirisuniruu");
 MOD_NAME("InGameKeyboard");
-MOD_VERSION("2.6.0");
+MOD_VERSION("2.7.0");
 
 void PreloaderModInit() {
     Mod::registerImGuiRender([]() {
