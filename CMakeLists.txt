@@ -14,6 +14,7 @@ target_include_directories(ingame_keyboard PRIVATE
     ${PRELOADER_ANDROID_ROOT}/include
     ${PRELOADER_ANDROID_ROOT}/external/imgui
     ${PRELOADER_ANDROID_ROOT}/deps/imgui
+    ${PRELOADER_ANDROID_ROOT}/external
 )
 
 target_link_libraries(ingame_keyboard PRIVATE preloader)
