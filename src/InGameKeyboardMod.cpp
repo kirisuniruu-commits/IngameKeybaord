@@ -1,4 +1,5 @@
 #include <pl/Mod.hpp>
+#include <imgui.h>
 
 // Mod UI State
 static bool g_showKeyboard = false;
