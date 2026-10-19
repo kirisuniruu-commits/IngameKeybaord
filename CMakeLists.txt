@@ -10,5 +10,10 @@ add_library(ingame_keyboard SHARED
     src/InGameKeyboardMod.cpp
 )
 
-target_include_directories(ingame_keyboard PRIVATE ${PRELOADER_ANDROID_ROOT}/include)
+target_include_directories(ingame_keyboard PRIVATE 
+    ${PRELOADER_ANDROID_ROOT}/include
+    ${PRELOADER_ANDROID_ROOT}/external/imgui
+    ${PRELOADER_ANDROID_ROOT}/deps/imgui
+)
+
 target_link_libraries(ingame_keyboard PRIVATE preloader)
