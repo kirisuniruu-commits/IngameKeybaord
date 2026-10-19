@@ -1,206 +1,112 @@
-// In-Game Keyboard - mod entry point and menu registration.
-// No ImGui. Uses only preloader-android APIs: ModuleBuilder, ButtonBuilder
-// (hold buttons that send real Android key events) and the touch callback.
-#include <pl/Input.hpp>
 #include <pl/Mod.hpp>
-#include <pl/ModMenu.hpp>
 
-#include <atomic>
-#include <cstdint>
-#include <cstdlib>
-#include <mutex>
-#include <string>
-#include <string_view>
+// Mod UI State
+static bool g_showEverywhere = true;
+static bool g_showKeyboard = false;
+static ImVec2 g_btnPos = ImVec2(50, 100);
+static float g_btnSize = 50.0f;
+static float g_opacity = 0.85f;
+static float g_kbScale = 1.0f;
 
-#include "Keyboard.hpp"
-
-namespace {
-
-// Android KeyEvent codes for the hold-to-move buttons.
-struct MoveKey { const char* id; const char* label; int keyCode; };
-constexpr MoveKey kMoveKeys[] = {
-    {"in_game_keyboard.w", "W", 51},  // KEYCODE_W
-    {"in_game_keyboard.a", "A", 29},  // KEYCODE_A
-    {"in_game_keyboard.s", "S", 47},  // KEYCODE_S
-    {"in_game_keyboard.d", "D", 32},  // KEYCODE_D
-};
-
-class InGameKeyboardMod {
-public:
-  static InGameKeyboardMod& instance() {
-    static InGameKeyboardMod mod;
-    return mod;
-  }
-
-  InGameKeyboardMod() : mSelf(*ll::mod::NativeMod::current()) {}
-
-  [[nodiscard]] ll::mod::NativeMod& getSelf() const { return mSelf; }
-
-  bool load() {
-    if (!inject::init(getSelf().getJavaVM())) {
-      getSelf().getLogger().error(
-          "Text-input natives not found in libminecraftpe.so; "
-          "keyboard will draw but cannot type");
+// Helper to send character inputs directly into Minecraft text fields / chat
+void RenderTypeKey(const char* label, char character, float width = 38.0f) {
+    ImVec2 keySize = ImVec2(width * g_kbScale, 38 * g_kbScale);
+    if (ImGui::Button(label, keySize)) {
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddInputCharacter(character);
     }
-    return true;
-  }
+}
 
-  bool enable() {
-    mEnabled = true;
-    kb::g_onHidden = &InGameKeyboardMod::onKeyboardHidden;
+// Main UI Rendering function
+void RenderInGameKeyboardUI() {
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_opacity);
 
-    if (!mTouchRegistered.exchange(true)) {
-      pl::input::registerTouchCallback([](const pl::input::TouchEvent& e) {
-        if (!instance().mEnabled) return false;
-        return kb::onTouch(e.action, e.pointerId, e.x, e.y);
-      });
+    ImGuiWindowFlags commonFlags = ImGuiWindowFlags_NoCollapse | 
+                                   ImGuiWindowFlags_AlwaysAutoResize;
+
+    // 1. Movable & Transparent "KB" Toggle Button
+    if (g_showEverywhere) {
+        ImGui::SetNextWindowPos(g_btnPos, ImGuiCond_FirstUseEver);
+        ImGuiWindowFlags btnFlags = commonFlags | ImGuiWindowFlags_NoTitleBar |
+                                                  ImGuiWindowFlags_NoResize |
+                                                  ImGuiWindowFlags_NoScrollbar;
+
+        if (ImGui::Begin("##KBToggle", nullptr, btnFlags)) {
+            g_btnPos = ImGui::GetWindowPos();
+
+            if (ImGui::Button("KB", ImVec2(g_btnSize, g_btnSize))) {
+                g_showKeyboard = !g_showKeyboard;
+            }
+        }
+        ImGui::End();
     }
 
-    const bool moduleOk =
-        pl::modmenu::ModuleBuilder(kModuleId, "In-Game Keyboard")
-            .modId(getSelf().getId())
-            .description("On-screen keyboard plus hold-to-move W/A/S/D buttons.")
-            .defaultEnabled(false)
-            .onToggle(onModuleToggle)
-            .config("opacity", "Opacity (%)",
-                    pl::modmenu::ConfigType::SliderInt, "85", "10", "100")
-            .config("buttonSize", "Button Size (%)",
-                    pl::modmenu::ConfigType::SliderInt, "100", "50", "200")
-            .config("scale", "Keyboard Scale",
-                    pl::modmenu::ConfigType::SliderFloat, "1.0", "0.5", "2.0")
-            .config("posX", "Horizontal Position (%)",
-                    pl::modmenu::ConfigType::SliderInt, "50", "0", "100")
-            .config("posY", "Vertical Position (%)",
-                    pl::modmenu::ConfigType::SliderInt, "100", "0", "100")
-            .onConfigChanged(onConfigChanged)
-            .registerModule();
-    if (!moduleOk) {
-      getSelf().getLogger().error("Module registration failed");
-      return false;
+    // 2. Full Typable Virtual Keyboard Interface (Opens when KB button is toggled)
+    if (g_showKeyboard) {
+        ImGui::SetNextWindowSize(ImVec2(480 * g_kbScale, 280 * g_kbScale), ImGuiCond_FirstUseEver);
+
+        if (ImGui::Begin("Virtual Keyboard", &g_showKeyboard, commonFlags)) {
+            
+            // Settings Menu (Show Everywhere option is safely tucked inside here)
+            if (ImGui::CollapsingHeader("Settings")) {
+                ImGui::Checkbox("Show Everywhere (Menus, Settings, Chat)", &g_showEverywhere);
+                ImGui::SliderFloat("Opacity", &g_opacity, 0.2f, 1.0f);
+                ImGui::SliderFloat("Button Size", &g_btnSize, 35.0f, 90.0f);
+                ImGui::SliderFloat("Keyboard Scale", &g_kbScale, 0.6f, 1.8f);
+            }
+
+            ImGui::Separator();
+
+            // QWERTY Row 1
+            const char* row1Str = "qwertyuiop";
+            for (int i = 0; i < 10; ++i) {
+                char label[2] = { row1Str[i], '\0' };
+                RenderTypeKey(label, row1Str[i]);
+                if (i < 9) ImGui::SameLine();
+            }
+
+            // QWERTY Row 2
+            const char* row2Str = "asdfghjkl";
+            for (int i = 0; i < 9; ++i) {
+                char label[2] = { row2Str[i], '\0' };
+                RenderTypeKey(label, row2Str[i]);
+                if (i < 8) ImGui::SameLine();
+            }
+
+            // QWERTY Row 3
+            const char* row3Str = "zxcvbnm";
+            for (int i = 0; i < 7; ++i) {
+                char label[2] = { row3Str[i], '\0' };
+                RenderTypeKey(label, row3Str[i]);
+                if (i < 6) ImGui::SameLine();
+            }
+
+            ImGui::Separator();
+
+            // Spacebar & Backspace
+            if (ImGui::Button("Space", ImVec2(200 * g_kbScale, 36 * g_kbScale))) {
+                ImGui::GetIO().AddInputCharacter(' ');
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Back", ImVec2(90 * g_kbScale, 36 * g_kbScale))) {
+                ImGuiIO& io = ImGui::GetIO();
+                io.AddKeyEvent(ImGuiKey_Backspace, true);
+                io.AddKeyEvent(ImGuiKey_Backspace, false);
+            }
+        }
+        ImGui::End();
     }
-    registerKbButton();
-    return true;
-  }
 
-  bool disable() {
-    mEnabled = false;
-    kb::setVisible(false);
-    unregisterMoveButtons();
-    pl::modmenu::unregisterButton(kKbButtonId);
-    pl::modmenu::unregisterModule(kModuleId);
-    return true;
-  }
+    ImGui::PopStyleVar();
+}
 
-  bool unload() { return true; }
+// Mod Initialization Hook
+MOD_AUTHOR("Kirisuniruu");
+MOD_NAME("InGameKeyboard");
+MOD_VERSION("1.5.0");
 
-private:
-  ll::mod::NativeMod& mSelf;
-  std::atomic_bool mEnabled{false};
-  std::atomic_bool mTouchRegistered{false};
-  std::mutex mLock;
-  kb::Settings mSettings;
-  float mButtonSize = 1.0f;
-  bool mMoveButtonsShown = false;
-
-  static std::uint32_t alphaColor(std::uint32_t argb, float opacity) {
-    const float a = static_cast<float>(argb >> 24) * opacity;
-    return (static_cast<std::uint32_t>(a) << 24) | (argb & 0x00FFFFFFu);
-  }
-
-  // Transparent "KB" toggle button. The launcher owns the floating button's
-  // placement; drag/resize it in the launcher's button layout editor.
-  void registerKbButton() {
-    pl::modmenu::unregisterButton(kKbButtonId);
-    const float o = mSettings.opacity;
-    (void)pl::modmenu::ButtonBuilder(kKbButtonId, "KB")
-        .moduleId(kModuleId)
-        .label("KB")
-        .behavior(pl::modmenu::ButtonBehavior::Toggle)
-        .styleColors(alphaColor(0x80000000u, o), alphaColor(0xA03C7BD9u, o),
-                     alphaColor(0x80FFFFFFu, o))
-        .textColor(alphaColor(0xFFFFFFFFu, o))
-        .activeTextColor(0xFFFFFFFFu)
-        .sizeScale(mButtonSize)
-        .onEvent(onButtonEvent)
-        .registerButton();
-  }
-
-  // Hold buttons send KeyEvent ACTION_DOWN on press and ACTION_UP on release,
-  // so the game sees a real held key.
-  void registerMoveButtons() {
-    unregisterMoveButtons();
-    const float o = mSettings.opacity;
-    for (const auto& k : kMoveKeys) {
-      (void)pl::modmenu::ButtonBuilder(k.id, k.label)
-          .moduleId(kModuleId)
-          .label(k.label)
-          .androidKeyCode(k.keyCode)
-          .behavior(pl::modmenu::ButtonBehavior::Hold)
-          .styleColors(alphaColor(0x80000000u, o), alphaColor(0xC03C7BD9u, o),
-                       alphaColor(0x80FFFFFFu, o))
-          .textColor(alphaColor(0xFFFFFFFFu, o))
-          .activeTextColor(0xFFFFFFFFu)
-          .sizeScale(mButtonSize)
-          .registerButton();
-    }
-    mMoveButtonsShown = true;
-  }
-
-  void unregisterMoveButtons() {
-    for (const auto& k : kMoveKeys) pl::modmenu::unregisterButton(k.id);
-    mMoveButtonsShown = false;
-  }
-
-  void applyVisibility(bool open) {
-    std::lock_guard lock(mLock);
-    if (open) registerMoveButtons(); else unregisterMoveButtons();
-  }
-
-  static void onKeyboardHidden() {   // Hide key pressed on the keyboard
-    instance().applyVisibility(false);
-  }
-
-  static void onModuleToggle(std::string_view moduleId, bool enabled) {
-    if (moduleId != kModuleId) return;
-    kb::setVisible(enabled);
-    instance().applyVisibility(enabled);
-  }
-
-  static void onButtonEvent(std::string_view buttonId,
-                            pl::modmenu::ButtonEvent event, float value) {
-    if (buttonId != kKbButtonId ||
-        event != pl::modmenu::ButtonEvent::StateChanged) return;
-    const bool open = value > 0.5f;
-    kb::setVisible(open);
-    instance().applyVisibility(open);
-  }
-
-  static void onConfigChanged(std::string_view moduleId, std::string_view key,
-                              std::string_view value) {
-    if (moduleId != kModuleId) return;
-    auto& self = instance();
-    const float v = std::strtof(std::string(value).c_str(), nullptr);
-    bool buttonsChanged = false;
-    if (key == "posX")            self.mSettings.xPercent = v;
-    else if (key == "posY")       self.mSettings.yPercent = v;
-    else if (key == "scale")      self.mSettings.scale = std::max(0.5f, v);
-    else if (key == "opacity") {
-      self.mSettings.opacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
-      buttonsChanged = true;
-    } else if (key == "buttonSize") {
-      self.mButtonSize = std::clamp(v / 100.0f, 0.5f, 2.0f);
-      buttonsChanged = true;
-    } else return;
-
-    kb::configure(self.mSettings);
-    if (buttonsChanged) {
-      std::lock_guard lock(self.mLock);
-      self.registerKbButton();
-      if (self.mMoveButtonsShown) self.registerMoveButtons();
-    }
-  }
-};
-
-} // namespace
-
-PL_REGISTER_MOD(InGameKeyboardMod, InGameKeyboardMod::instance())
+void PreloaderModInit() {
+    Mod::registerImGuiRender([]() {
+        RenderInGameKeyboardUI();
+    });
+}
