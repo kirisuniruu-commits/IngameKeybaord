@@ -1,48 +1,42 @@
-import os
+#!/usr/bin/env python3
+"""Package libingame_keyboard.so + manifest.json into a .levipack (zip)."""
+import argparse
+import json
 import sys
 import zipfile
-import json
-import argparse
+from pathlib import Path
 
-def main():
-    parser = argparse.ArgumentParser(description="Package LeviPack")
-    parser.add_argument("--library", required=True, help="Path to compiled .so file")
-    parser.add_argument("--output", required=True, help="Output .levipack path")
-    args = parser.parse_args()
+ROOT = Path(__file__).resolve().parent.parent
 
-    if not os.path.exists(args.library):
-        print(f"Error: Library file {args.library} not found.")
-        sys.exit(1)
 
-    output_dir = os.path.dirname(args.output)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Package LeviPack")
+    ap.add_argument("--library", required=True, help="Path to compiled .so")
+    ap.add_argument("--output", required=True, help="Output .levipack path")
+    ap.add_argument("--manifest", default=str(ROOT / "manifest.json"))
+    args = ap.parse_args()
 
-    manifest = {
-        "format_version": 1,
-        "header": {
-            "name": "InGameKeyboard",
-            "description": "In-game Virtual Keyboard Mod for LeviLauncher",
-            "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-            "version": [1, 0, 0],
-            "min_game_version": [1, 20, 0]
-        },
-        "modules": [
-            {
-                "type": "native",
-                "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-                "version": [1, 0, 0],
-                "path": "libingame_keyboard.so"
-            }
-        ]
-    }
+    lib, manifest_path, out = Path(args.library), Path(args.manifest), Path(args.output)
+    if not lib.is_file():
+        print(f"Error: library not found: {lib}", file=sys.stderr)
+        return 1
+    if not manifest_path.is_file():
+        print(f"Error: manifest not found: {manifest_path}", file=sys.stderr)
+        return 1
 
-    with zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        zipf.writestr("manifest.json", json.dumps(manifest, indent=2))
-        zipf.write(args.library, arcname="libingame_keyboard.so")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = manifest.get("entry")
+    if entry != lib.name:
+        print(f"Error: manifest entry '{entry}' != library name '{lib.name}'", file=sys.stderr)
+        return 1
 
-    print(f"Successfully created LeviPack at: {args.output}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(manifest_path, "manifest.json")
+        z.write(lib, entry)
+    print(f"Created {out}")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
-  
+    sys.exit(main())
