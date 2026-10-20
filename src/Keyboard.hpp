@@ -13,14 +13,15 @@
 
 #include <pl/ModMenu.hpp>
 
-#include "AndroidUi.hpp"
+#include "Extras.hpp"
 
 inline constexpr const char* kModuleId = "in_game_keyboard.module";
 inline constexpr const char* kKbButtonId = "in_game_keyboard.kb";
 
 namespace kb {
 
-enum class Kind { Char, Shift, Back, Space, Enter, Esc, Tab, Symbols, MoreSymbols, Hide };
+enum class Kind { Char, Shift, Back, Space, Enter, Esc, Tab, Symbols, MoreSymbols, Hide,
+                  Copy, Cut, Paste };
 
 struct Key {
   std::string label;
@@ -34,12 +35,14 @@ struct Settings {
   float xPercent = 50.0f;    // 0 = left, 100 = right
   float yPercent = 100.0f;   // 0 = top,  100 = bottom
   float scale = 1.0f;
-  float opacity = 0.85f;     // 0.1 .. 1.0
+  float opacity = 0.85f;     // keyboard opacity, 0.1 .. 1.0
+  float buttonOpacity = 0.85f;   // KB button opacity
 };
 
 struct Press {               // one finger holding one key
   bool active = false;
   int pointerId = -1, row = -1, col = -1, keyCode = 0, meta = 0;
+  bool repeat = false;       // Backspace auto-repeat running
 };
 
 inline std::mutex       g_mutex;
@@ -77,7 +80,7 @@ inline std::vector<Row> makeLayout(int page, bool shift) {
     rows.push_back(charRow(digits, false));
     rows.push_back(charRow("qwertyuiop", shift));
     rows.push_back(charRow("asdfghjkl", shift));
-    Row r; r.keys.push_back(mk(g_caps ? "CAPS" : "Shift", Kind::Shift, 1.5f));
+    Row r; r.keys.push_back(mk("Caps", Kind::Shift, 1.5f));
     for (auto& k : charRow("zxcvbnm", shift).keys) r.keys.push_back(k);
     r.keys.push_back(mk("<-", Kind::Back, 1.5f));
     rows.push_back(std::move(r));
@@ -89,7 +92,8 @@ inline std::vector<Row> makeLayout(int page, bool shift) {
     rows.push_back(std::move(r3));
     Row r4; r4.keys.push_back(mk("=\\<", Kind::MoreSymbols, 1.5f));
     for (auto& k : charRow("~`|^", false).keys) r4.keys.push_back(k);
-    r4.keys.push_back(mk("Tab", Kind::Tab, 2.5f));
+    r4.keys.push_back(mk("Copy", Kind::Copy, 2.0f));
+    r4.keys.push_back(mk("Paste", Kind::Paste, 2.5f));
     rows.push_back(std::move(r4));
   } else {
     rows.push_back(charRow("[]{}<>=^|~", false));
@@ -99,6 +103,9 @@ inline std::vector<Row> makeLayout(int page, bool shift) {
     rows.push_back(std::move(r3));
     Row r4; r4.keys.push_back(mk("?123", Kind::MoreSymbols, 1.5f));
     r4.keys.push_back(mk("Tab", Kind::Tab, 2.5f));
+    r4.keys.push_back(mk("Cut", Kind::Cut, 2.0f));
+    r4.keys.push_back(mk("Copy", Kind::Copy, 2.0f));
+    r4.keys.push_back(mk("Paste", Kind::Paste, 2.0f));
     rows.push_back(std::move(r4));
   }
   Row b;
@@ -193,7 +200,6 @@ inline void apply(bool knownUiThread) {
 inline int holdKeyCode(const Key& k) {   // Android KeyEvent codes
   switch (k.kind) {
     case Kind::Space: return 62;
-    case Kind::Back:  return 67;
     case Kind::Enter: return 66;
     case Kind::Esc:   return 111;
     case Kind::Tab:   return 61;
@@ -219,12 +225,21 @@ inline Press* findPress(int pointerId) {
   for (auto& p : g_press) if (p.active && p.pointerId == pointerId) return &p;
   return nullptr;
 }
-inline void clearPresses() { for (auto& p : g_press) p = Press{}; }
+inline void clearPresses() {
+  for (auto& p : g_press) { if (p.repeat) extras::stopRepeat(); p = Press{}; }
+}
 
 inline void pressKey(const Key& k, int pointerId, int row, int col) {   // lock held
   Press* p = freePress();
   if (!p) return;
   p->active = true; p->pointerId = pointerId; p->row = row; p->col = col;
+  if (k.kind == Kind::Back) {          // one delete now, then repeat while held
+    ui::sendKey(0, 67, 0);
+    ui::sendKey(1, 67, 0);
+    p->repeat = true;
+    extras::startRepeat(67, 450, 110);
+    return;
+  }
   const int code = holdKeyCode(k);
   if (code) {
     const int meta = isLetter(k) && (g_shift || g_caps)
@@ -252,6 +267,9 @@ inline void pressKey(const Key& k, int pointerId, int row, int col) {   // lock 
       g_page = (g_page == 1) ? 2 : 1; clearPresses(); layoutRects(); break;
     case Kind::Hide:
       g_visible = false; clearPresses(); break;
+    case Kind::Copy:  extras::clipboard(extras::ClipOp::Copy); break;
+    case Kind::Cut:   extras::clipboard(extras::ClipOp::Cut); break;
+    case Kind::Paste: extras::clipboard(extras::ClipOp::Paste); break;
     default: break;
   }
 }
@@ -269,6 +287,7 @@ inline bool inPanel(float px, float py) {
 }
 
 inline void releasePress(Press& p) {   // lock held
+  if (p.repeat) extras::stopRepeat();
   if (p.keyCode) ui::sendKey(1, p.keyCode, p.meta);   // key up, even if the finger slid away
   p = Press{};
 }
