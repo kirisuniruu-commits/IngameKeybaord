@@ -1,6 +1,7 @@
 // In-Game Keyboard - mod entry point and menu registration.
 // A real Android view (visible on every Minecraft screen) that sends real key
-// events. No ImGui, no render hooks, no background threads.
+// events. No ImGui and no render hooks; a short-lived thread runs only while
+// Backspace is held.
 #include <pl/Input.hpp>
 #include <pl/Mod.hpp>
 #include <pl/ModMenu.hpp>
@@ -51,8 +52,8 @@ public:
             .onToggle(onModuleToggle)
             .config("opacity", "Opacity (%)",
                     pl::modmenu::ConfigType::SliderInt, "85", "10", "100")
-            .config("buttonSize", "KB Button Size (%)",
-                    pl::modmenu::ConfigType::SliderInt, "100", "50", "200")
+            .config("kbOpacity", "Keyboard Opacity (%)",
+                    pl::modmenu::ConfigType::SliderInt, "85", "10", "100")
             .config("scale", "Keyboard Scale",
                     pl::modmenu::ConfigType::SliderFloat, "1.0", "0.5", "2.0")
             .config("posX", "Horizontal Position (%)",
@@ -84,7 +85,6 @@ private:
   std::atomic_bool mEnabled{false};
   std::atomic_bool mTouchRegistered{false};
   kb::Settings mSettings;
-  float mButtonSize = 1.0f;
 
   static std::uint32_t alphaColor(std::uint32_t argb, float opacity) {
     const float a = static_cast<float>(argb >> 24) * opacity;
@@ -95,7 +95,7 @@ private:
   // drag/resize it in the launcher's button layout editor.
   void registerKbButton() {
     pl::modmenu::unregisterButton(kKbButtonId);
-    const float o = mSettings.opacity;
+    const float o = mSettings.buttonOpacity;
     (void)pl::modmenu::ButtonBuilder(kKbButtonId, "KB")
         .moduleId(kModuleId)
         .label("KB")
@@ -104,7 +104,6 @@ private:
                      alphaColor(0x80FFFFFFu, o))
         .textColor(alphaColor(0xFFFFFFFFu, o))
         .activeTextColor(0xFFFFFFFFu)
-        .sizeScale(mButtonSize)
         .onEvent(onButtonEvent)
         .registerButton();
   }
@@ -130,13 +129,12 @@ private:
     if (key == "posX")            self.mSettings.xPercent = v;
     else if (key == "posY")       self.mSettings.yPercent = v;
     else if (key == "scale")      self.mSettings.scale = std::max(0.5f, v);
-    else if (key == "opacity") {
+    else if (key == "opacity") {            // KB button
+      self.mSettings.buttonOpacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
+      buttonChanged = true;
+    } else if (key == "kbOpacity")          // keyboard
       self.mSettings.opacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
-      buttonChanged = true;
-    } else if (key == "buttonSize") {
-      self.mButtonSize = std::clamp(v / 100.0f, 0.5f, 2.0f);
-      buttonChanged = true;
-    } else return;
+    else return;
 
     kb::configure(self.mSettings);
     if (buttonChanged) self.registerKbButton();
