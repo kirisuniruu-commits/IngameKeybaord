@@ -8,12 +8,14 @@
 
 namespace ui {
 
+// One on-screen layer = an ImageView showing a bitmap we draw into.
+struct Layer {
+  jobject view = nullptr, bitmap = nullptr, canvas = nullptr, paint = nullptr;  // global refs
+  int bw = 0, bh = 0;
+};
+
 inline JavaVM*   g_vm = nullptr;
-inline jobject   g_view = nullptr;     // ImageView (global ref)
-inline jobject   g_bitmap = nullptr;
-inline jobject   g_canvas = nullptr;
-inline jobject   g_paint = nullptr;
-inline int       g_bw = 0, g_bh = 0;
+inline Layer     g_kbLayer, g_btnLayer;   // keyboard panel and the KB button
 inline jclass    g_stateCls = nullptr;
 inline jmethodID g_getAct = nullptr;
 inline jmethodID g_mSetColor = nullptr, g_mRound = nullptr, g_mText = nullptr,
@@ -131,10 +133,10 @@ inline void tapChar(char c) {
 }
 
 // ---- view -----------------------------------------------------------------
-inline void releaseGlobals(JNIEnv* e) {
-  for (jobject* o : {&g_view, &g_bitmap, &g_canvas, &g_paint})
+inline void releaseGlobals(JNIEnv* e, Layer& L) {
+  for (jobject* o : {&L.view, &L.bitmap, &L.canvas, &L.paint})
     if (*o) { e->DeleteGlobalRef(*o); *o = nullptr; }
-  g_bw = g_bh = 0;
+  L.bw = L.bh = 0;
 }
 
 inline void setMargins(JNIEnv* e, jobject lp, int x, int y) {
@@ -146,26 +148,26 @@ inline void setMargins(JNIEnv* e, jobject lp, int x, int y) {
 }
 
 // Creates (or repositions) the keyboard view. Returns false on failure.
-inline bool ensureView(JNIEnv* e, int w, int h, int x, int y) {
+inline bool ensureView(JNIEnv* e, Layer& L, int w, int h, int x, int y) {
   e->PushLocalFrame(64);
   bool ok = false;
   jobject act = currentActivity(e);
   jmethodID find = act ? mid(e, act, "findViewById", "(I)Landroid/view/View;") : nullptr;
   jobject content = find ? e->CallObjectMethod(act, find, static_cast<jint>(16908290)) : nullptr;
   if (content) {
-    if (g_view) {   // still attached to this activity, same size?
-      jmethodID gp = mid(e, g_view, "getParent", "()Landroid/view/ViewParent;");
-      jobject parent = gp ? e->CallObjectMethod(g_view, gp) : nullptr;
+    if (L.view) {   // still attached to this activity, same size?
+      jmethodID gp = mid(e, L.view, "getParent", "()Landroid/view/ViewParent;");
+      jobject parent = gp ? e->CallObjectMethod(L.view, gp) : nullptr;
       const bool attached = parent && e->IsSameObject(parent, content);
-      if (!attached || w != g_bw || h != g_bh) {
+      if (!attached || w != L.bw || h != L.bh) {
         if (attached) {
           jmethodID rm = mid(e, content, "removeView", "(Landroid/view/View;)V");
-          if (rm) e->CallVoidMethod(content, rm, g_view);
+          if (rm) e->CallVoidMethod(content, rm, L.view);
         }
-        releaseGlobals(e);
+        releaseGlobals(e, L);
       }
     }
-    if (!g_view) {
+    if (!L.view) {
       jclass cfgC = e->FindClass("android/graphics/Bitmap$Config");
       jclass bmpC = e->FindClass("android/graphics/Bitmap");
       jclass canC = e->FindClass("android/graphics/Canvas");
@@ -201,50 +203,56 @@ inline bool ensureView(JNIEnv* e, int w, int h, int x, int y) {
           g_mInvalidate = mid(e, iv, "invalidate", "()V");
           g_mAlpha = mid(e, iv, "setAlpha", "(F)V");
           g_mVis = mid(e, iv, "setVisibility", "(I)V");
-          g_view = e->NewGlobalRef(iv);
-          g_bitmap = e->NewGlobalRef(bmp);
-          g_canvas = e->NewGlobalRef(canvas);
-          g_paint = e->NewGlobalRef(paint);
-          g_bw = w; g_bh = h;
+          L.view = e->NewGlobalRef(iv);
+          L.bitmap = e->NewGlobalRef(bmp);
+          L.canvas = e->NewGlobalRef(canvas);
+          L.paint = e->NewGlobalRef(paint);
+          L.bw = w; L.bh = h;
         }
       }
     } else {   // just move it
-      jmethodID glp = mid(e, g_view, "getLayoutParams", "()Landroid/view/ViewGroup$LayoutParams;");
-      jobject lp = glp ? e->CallObjectMethod(g_view, glp) : nullptr;
+      jmethodID glp = mid(e, L.view, "getLayoutParams", "()Landroid/view/ViewGroup$LayoutParams;");
+      jobject lp = glp ? e->CallObjectMethod(L.view, glp) : nullptr;
       if (lp) {
         setMargins(e, lp, x, y);
-        e->CallVoidMethod(g_view, mid(e, g_view, "requestLayout", "()V"));
+        e->CallVoidMethod(L.view, mid(e, L.view, "requestLayout", "()V"));
       }
     }
-    ok = g_view != nullptr;
+    ok = L.view != nullptr;
   }
   clearEx(e);
   e->PopLocalFrame(nullptr);
   return ok;
 }
 
-inline void setVisible(JNIEnv* e, bool on) {   // 0 = VISIBLE, 8 = GONE
-  if (g_view && g_mVis) e->CallVoidMethod(g_view, g_mVis, static_cast<jint>(on ? 0 : 8));
+inline void setVisible(JNIEnv* e, Layer& L, bool on) {   // 0 = VISIBLE, 8 = GONE
+  if (L.view && g_mVis) e->CallVoidMethod(L.view, g_mVis, static_cast<jint>(on ? 0 : 8));
   clearEx(e);
 }
-inline void setAlpha(JNIEnv* e, float a) {
-  if (g_view && g_mAlpha) e->CallVoidMethod(g_view, g_mAlpha, a);
+inline void setAlpha(JNIEnv* e, Layer& L, float a) {
+  if (L.view && g_mAlpha) e->CallVoidMethod(L.view, g_mAlpha, a);
+  clearEx(e);
+}
+inline void bringToFront(JNIEnv* e, Layer& L) {
+  if (!L.view) return;
+  jmethodID m = mid(e, L.view, "bringToFront", "()V");
+  if (m) e->CallVoidMethod(L.view, m);
   clearEx(e);
 }
 
-// ---- drawing into the bitmap ----------------------------------------------
-inline void beginDraw(JNIEnv* e) { e->CallVoidMethod(g_bitmap, g_mErase, static_cast<jint>(0)); }
-inline void endDraw(JNIEnv* e) { e->CallVoidMethod(g_view, g_mInvalidate); clearEx(e); }
+// ---- drawing into a layer's bitmap ----------------------------------------
+inline void beginDraw(JNIEnv* e, Layer& L) { e->CallVoidMethod(L.bitmap, g_mErase, static_cast<jint>(0)); }
+inline void endDraw(JNIEnv* e, Layer& L) { e->CallVoidMethod(L.view, g_mInvalidate); clearEx(e); }
 
-inline void fillRound(JNIEnv* e, float l, float t, float r, float b, float rad, std::uint32_t argb) {
-  e->CallVoidMethod(g_paint, g_mSetColor, static_cast<jint>(argb));
-  e->CallVoidMethod(g_canvas, g_mRound, l, t, r, b, rad, rad, g_paint);
+inline void fillRound(JNIEnv* e, Layer& L, float l, float t, float r, float b, float rad, std::uint32_t argb) {
+  e->CallVoidMethod(L.paint, g_mSetColor, static_cast<jint>(argb));
+  e->CallVoidMethod(L.canvas, g_mRound, l, t, r, b, rad, rad, L.paint);
 }
-inline void text(JNIEnv* e, const std::string& s, float cx, float baseline, float size, std::uint32_t argb) {
+inline void text(JNIEnv* e, Layer& L, const std::string& s, float cx, float baseline, float size, std::uint32_t argb) {
   jstring js = e->NewStringUTF(s.c_str());
-  e->CallVoidMethod(g_paint, g_mSetColor, static_cast<jint>(argb));
-  e->CallVoidMethod(g_paint, g_mTextSize, size);
-  e->CallVoidMethod(g_canvas, g_mText, js, cx, baseline, g_paint);
+  e->CallVoidMethod(L.paint, g_mSetColor, static_cast<jint>(argb));
+  e->CallVoidMethod(L.paint, g_mTextSize, size);
+  e->CallVoidMethod(L.canvas, g_mText, js, cx, baseline, L.paint);
   e->DeleteLocalRef(js);
 }
 
