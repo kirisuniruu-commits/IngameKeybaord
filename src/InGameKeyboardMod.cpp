@@ -1,21 +1,25 @@
 // In-Game Keyboard - mod entry point and menu registration.
-// A real Android view (visible on every Minecraft screen) that sends real key
-// events. No ImGui and no render hooks; a short-lived thread runs only while
-// Backspace is held.
+// The keyboard and the KB button are real Android views drawn above the game,
+// so they stay visible on every Minecraft screen. Settings are saved to a file.
 #include <pl/Input.hpp>
 #include <pl/Mod.hpp>
 #include <pl/ModMenu.hpp>
 
 #include <algorithm>
 #include <atomic>
-#include <cstdint>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <string_view>
 
-#include "Keyboard.hpp"
+#include "Storage.hpp"
 
 namespace {
+
+std::string pct(float fraction) { return std::to_string(static_cast<int>(std::lround(fraction * 100.0f))); }
+std::string whole(float v) { return std::to_string(static_cast<int>(std::lround(v))); }
+std::string one(float v) { char b[16]; std::snprintf(b, sizeof b, "%.1f", v); return b; }
 
 class InGameKeyboardMod {
 public:
@@ -36,6 +40,13 @@ public:
   bool enable() {
     mEnabled = true;
 
+    // Bring back the saved position, size and opacity.
+    store::init(getSelf().getDataDir());
+    kb::Settings s = kb::getSettings();
+    store::load(s);
+    kb::configure(s);
+    kb::g_saveHook = [](const kb::Settings& v) { store::save(v); };
+
     if (!mTouchRegistered.exchange(true)) {
       pl::input::registerTouchCallback([](const pl::input::TouchEvent& e) {
         if (!instance().mEnabled) return false;
@@ -46,34 +57,33 @@ public:
     const bool moduleOk =
         pl::modmenu::ModuleBuilder(kModuleId, "In-Game Keyboard")
             .modId(getSelf().getId())
-            .description("Full on-screen keyboard that works on every screen: "
-                         "chat, menus, signs, and held keys like W/A/S/D.")
-            .defaultEnabled(false)
+            .description("Turn on to show the KB button. Tap KB to open or close "
+                         "the keyboard; drag KB to move it. Works on every screen.")
+            .defaultEnabled(true)
             .onToggle(onModuleToggle)
             .config("opacity", "Opacity (%)",
-                    pl::modmenu::ConfigType::SliderInt, "85", "10", "100")
+                    pl::modmenu::ConfigType::SliderInt, pct(s.buttonOpacity), "10", "100")
             .config("kbOpacity", "Keyboard Opacity (%)",
-                    pl::modmenu::ConfigType::SliderInt, "85", "10", "100")
+                    pl::modmenu::ConfigType::SliderInt, pct(s.opacity), "10", "100")
             .config("scale", "Keyboard Scale",
-                    pl::modmenu::ConfigType::SliderFloat, "1.0", "0.5", "2.0")
+                    pl::modmenu::ConfigType::SliderFloat, one(s.scale), "0.5", "2.0")
             .config("posX", "Horizontal Position (%)",
-                    pl::modmenu::ConfigType::SliderInt, "50", "0", "100")
+                    pl::modmenu::ConfigType::SliderInt, whole(s.xPercent), "0", "100")
             .config("posY", "Vertical Position (%)",
-                    pl::modmenu::ConfigType::SliderInt, "100", "0", "100")
+                    pl::modmenu::ConfigType::SliderInt, whole(s.yPercent), "0", "100")
             .onConfigChanged(onConfigChanged)
             .registerModule();
     if (!moduleOk) {
       getSelf().getLogger().error("Module registration failed");
       return false;
     }
-    registerKbButton();
+    kb::setEnabled(true);   // the launcher replays an "off" setting through onToggle
     return true;
   }
 
   bool disable() {
     mEnabled = false;
-    kb::setVisible(false);
-    pl::modmenu::unregisterButton(kKbButtonId);
+    kb::setEnabled(false);
     pl::modmenu::unregisterModule(kModuleId);
     return true;
   }
@@ -84,60 +94,25 @@ private:
   ll::mod::NativeMod& mSelf;
   std::atomic_bool mEnabled{false};
   std::atomic_bool mTouchRegistered{false};
-  kb::Settings mSettings;
-
-  static std::uint32_t alphaColor(std::uint32_t argb, float opacity) {
-    const float a = static_cast<float>(argb >> 24) * opacity;
-    return (static_cast<std::uint32_t>(a) << 24) | (argb & 0x00FFFFFFu);
-  }
-
-  // Transparent "KB" toggle. The launcher owns floating button placement, so
-  // drag/resize it in the launcher's button layout editor.
-  void registerKbButton() {
-    pl::modmenu::unregisterButton(kKbButtonId);
-    const float o = mSettings.buttonOpacity;
-    (void)pl::modmenu::ButtonBuilder(kKbButtonId, "KB")
-        .moduleId(kModuleId)
-        .label("KB")
-        .behavior(pl::modmenu::ButtonBehavior::Toggle)
-        .styleColors(alphaColor(0x80000000u, o), alphaColor(0xA03C7BD9u, o),
-                     alphaColor(0x80FFFFFFu, o))
-        .textColor(alphaColor(0xFFFFFFFFu, o))
-        .activeTextColor(0xFFFFFFFFu)
-        .onEvent(onButtonEvent)
-        .registerButton();
-  }
 
   static void onModuleToggle(std::string_view moduleId, bool enabled) {
     if (moduleId != kModuleId) return;
-    kb::setVisible(enabled);
-  }
-
-  static void onButtonEvent(std::string_view buttonId,
-                            pl::modmenu::ButtonEvent event, float value) {
-    if (buttonId != kKbButtonId ||
-        event != pl::modmenu::ButtonEvent::StateChanged) return;
-    kb::setVisible(value > 0.5f);
+    kb::setEnabled(enabled);
   }
 
   static void onConfigChanged(std::string_view moduleId, std::string_view key,
                               std::string_view value) {
     if (moduleId != kModuleId) return;
-    auto& self = instance();
     const float v = std::strtof(std::string(value).c_str(), nullptr);
-    bool buttonChanged = false;
-    if (key == "posX")            self.mSettings.xPercent = v;
-    else if (key == "posY")       self.mSettings.yPercent = v;
-    else if (key == "scale")      self.mSettings.scale = std::max(0.5f, v);
-    else if (key == "opacity") {            // KB button
-      self.mSettings.buttonOpacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
-      buttonChanged = true;
-    } else if (key == "kbOpacity")          // keyboard
-      self.mSettings.opacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
+    kb::Settings s = kb::getSettings();
+    if (key == "posX")            s.xPercent = std::clamp(v, 0.0f, 100.0f);
+    else if (key == "posY")       s.yPercent = std::clamp(v, 0.0f, 100.0f);
+    else if (key == "scale")      s.scale = std::clamp(v, 0.5f, 2.0f);
+    else if (key == "opacity")    s.buttonOpacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
+    else if (key == "kbOpacity")  s.opacity = std::clamp(v / 100.0f, 0.1f, 1.0f);
     else return;
-
-    kb::configure(self.mSettings);
-    if (buttonChanged) self.registerKbButton();
+    kb::configure(s);
+    store::save(s);
   }
 };
 
